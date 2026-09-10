@@ -1,4 +1,5 @@
 import { Bot, CheckCircle2, ExternalLink, Terminal, Webhook } from 'lucide-react'
+import { WebhookSetup } from '@/components/webhook-setup'
 
 const steps = [
   { icon: Terminal, title: 'Tokenni kiriting', text: 'BotFather bergan tokenni TELEGRAM_BOT_TOKEN o‘zgaruvchisiga qo‘ying.' },
@@ -23,6 +24,7 @@ export default function Page() {
           </div>
           <div className="rounded-2xl border border-border bg-card p-6 shadow-sm"><div className="mb-6 flex items-center gap-3 border-b border-border pb-5"><span className="grid size-9 place-items-center rounded-full bg-accent text-accent-foreground"><Bot size={18} /></span><div><p className="text-sm font-medium">O‘zbekcha Bot</p><p className="text-xs text-muted-foreground">online</p></div></div><div className="flex flex-col gap-3 text-sm"><div className="max-w-[85%] rounded-2xl rounded-tl-sm bg-muted p-3 leading-6">Assalomu alaykum! Men sizning yordamchingizman.</div><div className="ml-auto max-w-[75%] rounded-2xl rounded-tr-sm bg-primary p-3 text-primary-foreground">Vazifalarim</div><div className="max-w-[85%] rounded-2xl rounded-tl-sm bg-muted p-3 leading-6">Sizda hozircha vazifalar yo‘q.</div></div></div>
         </section>
+        <section className="border-t border-border pt-12"><WebhookSetup /></section>
         <section id="qollanma" className="flex flex-col gap-8 border-t border-border pt-12"><div><p className="mb-2 text-sm font-medium text-muted-foreground">Boshlash</p><h2 className="text-3xl font-semibold tracking-tight">Uch qadamda ishga tushiring</h2></div><div className="grid gap-4 md:grid-cols-3">{steps.map((step) => <article key={step.title} className="flex flex-col gap-5 rounded-2xl border border-border bg-card p-6"><step.icon className="text-primary" size={22} /><h3 className="text-lg font-medium">{step.title}</h3><p className="text-sm leading-6 text-muted-foreground">{step.text}</p></article>)}</div></section>
         <section className="grid gap-8 border-t border-border pt-12 md:grid-cols-2"><div><p className="mb-2 text-sm font-medium text-muted-foreground">Buyruqlar</p><h2 className="text-2xl font-semibold">Bot nimalarni biladi?</h2></div><div className="grid gap-3 text-sm">{[['/start','Boshlash va menyuni ko‘rsatish'],['/profile','Profil ma’lumotlarini ko‘rish'],['/tasks','Faol vazifalarni ko‘rish'],['/help','Yordam va yo‘riqnoma']].map(([command, text]) => <div key={command} className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-3"><code className="font-mono text-primary">{command}</code><span className="text-muted-foreground">{text}</span></div>)}</div></section>
       </div>
