@@ -1,63 +1,147 @@
-import { and, desc, eq } from 'drizzle-orm'
 import { NextRequest, NextResponse } from 'next/server'
 import { pool } from '@/lib/db'
 import { answerCallbackQuery, inlineMenu, mainKeyboard, sendMessage, type TelegramUpdate } from '@/lib/telegram'
 
 export const runtime = 'nodejs'
 
-async function ensureUser(user: NonNullable<TelegramUpdate['message']>['from']) {
-  if (!user) return null
-  const result = await pool.query(`INSERT INTO bot_users (telegram_id, username, first_name, last_name, language_code) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (telegram_id) DO UPDATE SET username = EXCLUDED.username, first_name = EXCLUDED.first_name, last_name = EXCLUDED.last_name, language_code = EXCLUDED.language_code, updated_at = NOW() RETURNING id`, [user.id, user.username ?? null, user.first_name ?? null, user.last_name ?? null, user.language_code ?? 'uz'])
-  return result.rows[0]?.id as number | undefined
-}
+const adminId = Number(process.env.ADMIN_TELEGRAM_ID)
+const isAdmin = (telegramId: number) => Number.isFinite(adminId) && telegramId === adminId
 
 async function logEvent(telegramId: number | undefined, eventType: string, payload: unknown) {
   await pool.query('INSERT INTO bot_events (telegram_id, event_type, payload) VALUES ($1, $2, $3)', [telegramId ?? null, eventType, JSON.stringify(payload)])
 }
 
+async function ensureUser(user: NonNullable<NonNullable<TelegramUpdate['message']>['from']>) {
+  const result = await pool.query(`INSERT INTO bot_users (telegram_id, username, first_name, last_name, language_code) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (telegram_id) DO UPDATE SET username = EXCLUDED.username, first_name = EXCLUDED.first_name, last_name = EXCLUDED.last_name, language_code = EXCLUDED.language_code, updated_at = NOW() RETURNING id`, [user.id, user.username ?? null, user.first_name ?? null, user.last_name ?? null, user.language_code ?? 'uz'])
+  return result.rows[0]?.id as number
+}
+
+async function applicationFor(telegramId: number) {
+  const result = await pool.query('SELECT * FROM employee_applications WHERE telegram_id = $1', [telegramId])
+  return result.rows[0]
+}
+
+function onboardingKeyboard() {
+  return { keyboard: [[{ text: 'Ariza topshirish' }], [{ text: 'Holatimni tekshirish' }]], resize_keyboard: true, is_persistent: true }
+}
+
+async function sendAccessDenied(chatId: number) {
+  await sendMessage(chatId, 'Kechirasiz, bu bot faqat Wentric Company jamoasi uchun. Sizga taklif havolasi yoki ruxsat berilgan Telegram ID kerak.', onboardingKeyboard())
+}
+
 async function handleMessage(update: TelegramUpdate) {
   const message = update.message
-  if (!message?.from || !message.text && !message.contact) return
-  const userId = await ensureUser(message.from)
-  await logEvent(message.from.id, 'message', update)
-  const text = message.text?.trim()
+  if (!message?.from || (!message.text && !message.contact)) return
+  const user = message.from
+  await ensureUser(user)
+  await logEvent(user.id, 'message', update)
+  const text = message.text?.trim() ?? ''
+  const startPayload = text.startsWith('/start') ? text.split(' ')[1] : null
 
-  if (message.contact?.phone_number && userId) {
-    await pool.query('INSERT INTO user_profiles (user_id, full_name, phone) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET full_name = EXCLUDED.full_name, phone = EXCLUDED.phone, updated_at = NOW()', [userId, message.contact.first_name ?? message.from.first_name ?? null, message.contact.phone_number])
-    await sendMessage(message.chat.id, 'Telefon raqamingiz saqlandi. Profilingiz tayyor.', mainKeyboard())
+  if (text.startsWith('/start')) {
+    if (isAdmin(user.id)) {
+      await sendMessage(message.chat.id, 'Wentric boshqaruv markaziga xush kelibsiz, Admin.', mainKeyboard())
+      return
+    }
+    if (!startPayload) {
+      await sendAccessDenied(message.chat.id)
+      return
+    }
+    const invite = await pool.query('SELECT id, code, max_uses, used_count FROM bot_invites WHERE code = $1 AND is_active = TRUE AND used_count < max_uses', [startPayload])
+    if (!invite.rows[0]) {
+      await sendMessage(message.chat.id, 'Bu taklif havolasi yaroqsiz yoki foydalanish limiti tugagan.', onboardingKeyboard())
+      return
+    }
+    const existing = await applicationFor(user.id)
+    if (existing) {
+      await sendMessage(message.chat.id, `Sizning arizangiz holati: ${existing.status === 'pending' ? 'ko‘rib chiqilmoqda' : existing.status === 'approved' ? 'tasdiqlangan' : 'rad etilgan'}.`, onboardingKeyboard())
+      return
+    }
+    await pool.query('INSERT INTO employee_applications (telegram_id, invite_id, full_name, temporary_id) VALUES ($1, $2, $3, $4)', [user.id, invite.rows[0].id, '', `TMP-${user.id}`])
+    await pool.query('UPDATE bot_invites SET used_count = used_count + 1 WHERE id = $1', [invite.rows[0].id])
+    await sendMessage(message.chat.id, 'Taklif havolasi qabul qilindi. Arizani to‘ldirish uchun “Ariza topshirish” tugmasini bosing.', onboardingKeyboard())
     return
   }
 
-  if (text === '/start' || text === '/help' || text === 'Yordam') {
-    await sendMessage(message.chat.id, `Assalomu alaykum, ${message.from.first_name ?? 'do‘st'}!\n\nMen sizning o‘zbekcha yordamchi botingizman. Profilni to‘ldirish, vazifalar qo‘shish va eslatmalarni boshqarishga yordam beraman.\n\nBuyruqlar:\n/start — boshlash\n/profile — profil\n/tasks — vazifalar\n/help — yordam`, mainKeyboard())
+  const application = await applicationFor(user.id)
+  if (!isAdmin(user.id) && !application) {
+    await sendAccessDenied(message.chat.id)
     return
   }
 
-  if (text === '/profile' || text === 'Profilim') {
-    const profile = await pool.query('SELECT p.full_name, p.phone, p.region, p.district FROM user_profiles p JOIN bot_users u ON u.id = p.user_id WHERE u.telegram_id = $1', [message.from.id])
-    const row = profile.rows[0]
-    await sendMessage(message.chat.id, row ? `Profilingiz:\nIsm: ${row.full_name ?? 'kiritilmagan'}\nTelefon: ${row.phone ?? 'kiritilmagan'}\nHudud: ${row.region ?? 'kiritilmagan'}\n\nTo‘liq HTML5 profil kartangizni oching:` : 'Profilingiz hali to‘ldirilmagan. Avval telefon raqamingizni yuboring.', row ? inlineMenu() : { keyboard: [[{ text: 'Telefon raqamni yuborish', request_contact: true }]], resize_keyboard: true })
+  if (text === 'Ariza topshirish') {
+    await sendMessage(message.chat.id, 'To‘liq ismingizni yuboring:', { force_reply: true })
     return
   }
 
-  if (text === '/tasks' || text === 'Vazifalarim') {
-    const tasks = await pool.query('SELECT title, status, due_at FROM user_tasks WHERE user_id = $1 ORDER BY created_at DESC LIMIT 10', [userId])
-    const body = tasks.rows.length ? tasks.rows.map((task, index) => `${index + 1}. ${task.title} — ${task.status === 'done' ? 'bajarilgan' : 'faol'}`).join('\n') : 'Hozircha vazifalar yo‘q.'
-    await sendMessage(message.chat.id, `Vazifalaringiz:\n\n${body}\n\nYangi vazifa qo‘shish uchun quyidagi tugmani bosing.`, inlineMenu())
+  if (text === 'Holatimni tekshirish') {
+    await sendMessage(message.chat.id, `Ariza holati: ${application?.status === 'pending' ? 'ko‘rib chiqilmoqda' : application?.status === 'approved' ? `tasdiqlangan. Employee ID: ${application.employee_id}` : 'rad etilgan'}.`, onboardingKeyboard())
     return
   }
 
-  await sendMessage(message.chat.id, 'Buyruqni tushunmadim. /help buyrug‘i orqali imkoniyatlarni ko‘ring.', mainKeyboard())
+  if (!isAdmin(user.id) && application?.status !== 'approved') {
+    if (text && !application?.full_name) {
+      await pool.query('UPDATE employee_applications SET full_name = $1, updated_at = NOW() WHERE telegram_id = $2', [text, user.id])
+      await sendMessage(message.chat.id, 'Telefon raqamingizni yuboring yoki yozing:', { force_reply: true })
+      return
+    }
+    if (text && application?.full_name && !application.phone) {
+      await pool.query('UPDATE employee_applications SET phone = $1, updated_at = NOW() WHERE telegram_id = $2', [text, user.id])
+      await sendMessage(message.chat.id, 'Lavozimingizni yozing:', { force_reply: true })
+      return
+    }
+    if (text && application?.phone && !application.position) {
+      await pool.query('UPDATE employee_applications SET position = $1, updated_at = NOW() WHERE telegram_id = $2', [text, user.id])
+      await sendMessage(message.chat.id, 'Qaysi bo‘limda ishlaysiz?', { force_reply: true })
+      return
+    }
+    if (text && application?.position && !application.department) {
+      await pool.query('UPDATE employee_applications SET department = $1, updated_at = NOW() WHERE telegram_id = $2', [text, user.id])
+      await sendMessage(message.chat.id, 'Arizangiz yuborildi. Admin tasdig‘ini kuting.', onboardingKeyboard())
+      if (Number.isFinite(adminId)) await sendMessage(adminId, `Yangi employee arizasi: ${application.full_name}\nTelegram ID: ${user.id}\nTasdiqlash uchun /pending buyrug‘ini bosing.`)
+      return
+    }
+    await sendMessage(message.chat.id, 'Ariza ma’lumotlarini ketma-ket yuboring. “Ariza topshirish” tugmasidan boshlang.', onboardingKeyboard())
+    return
+  }
+
+  if (isAdmin(user.id) && text === '/pending') {
+    const pending = await pool.query(`SELECT telegram_id, full_name, phone, position, department, temporary_id FROM employee_applications WHERE status = 'pending' ORDER BY created_at ASC LIMIT 20`)
+    if (!pending.rows.length) { await sendMessage(message.chat.id, 'Kutilayotgan arizalar yo‘q.', mainKeyboard()); return }
+    for (const row of pending.rows) await sendMessage(message.chat.id, `Ariza: ${row.full_name}\nTelefon: ${row.phone ?? '-'}\nLavozim: ${row.position ?? '-'}\nBo‘lim: ${row.department ?? '-'}\nVaqtinchalik ID: ${row.temporary_id}`, { inline_keyboard: [[{ text: 'Tasdiqlash', callback_data: `approve:${row.telegram_id}` }, { text: 'Rad etish', callback_data: `reject:${row.telegram_id}` }]] })
+    return
+  }
+
+  if (isAdmin(user.id) && text === '/invite') {
+    const code = `WENTRIC-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
+    await pool.query('INSERT INTO bot_invites (code, label, max_uses) VALUES ($1, $2, $3)', [code, 'Wentric employee invite', 1])
+    await sendMessage(message.chat.id, `Bir martalik invite havola:\nhttps://t.me/WentricEmployeebot?start=${code}`, mainKeyboard())
+    return
+  }
+
+  if (isAdmin(user.id)) { await sendMessage(message.chat.id, 'Admin buyruqlari: /invite — invite yaratish, /pending — arizalarni ko‘rish.', mainKeyboard()); return }
+  if (application?.status === 'approved') await sendMessage(message.chat.id, `Wentric Employee ID: ${application.employee_id}\n\nSizga hozircha yangi vazifa biriktirilmagan.`, mainKeyboard())
 }
 
 async function handleCallback(update: TelegramUpdate) {
   const query = update.callback_query
   if (!query?.message || !query.data) return
-  await logEvent(query.from.id, 'callback', query)
   await answerCallbackQuery(query.id)
-  if (query.data === 'help') await sendMessage(query.message.chat.id, 'Yordam: /profile orqali profilingizni, /tasks orqali vazifalaringizni ko‘ring.')
-  else if (query.data === 'profile') await sendMessage(query.message.chat.id, 'Profilni ko‘rish uchun /profile buyrug‘ini yuboring.')
-  else if (query.data === 'task_add') await sendMessage(query.message.chat.id, 'Vazifa qo‘shish moduli keyingi bosqichda ulanadi. Hozircha /tasks buyrug‘i ishlaydi.')
+  if (!isAdmin(query.from.id)) return
+  const [action, rawId] = query.data.split(':')
+  const telegramId = Number(rawId)
+  if (!telegramId || !['approve', 'reject'].includes(action)) return
+  if (action === 'approve') {
+    const next = await pool.query(`SELECT COALESCE(MAX(CAST(SUBSTRING(employee_id FROM 5) AS INTEGER)), 0) + 1 AS next_id FROM employee_applications WHERE employee_id LIKE 'WEN-%'`)
+    const employeeId = `WEN-${String(next.rows[0].next_id).padStart(4, '0')}`
+    await pool.query(`UPDATE employee_applications SET status = 'approved', employee_id = $1, reviewed_by = $2, reviewed_at = NOW(), updated_at = NOW() WHERE telegram_id = $3 AND status = 'pending'`, [employeeId, query.from.id, telegramId])
+    await sendMessage(telegramId, `Tabriklaymiz. Siz Wentric Company jamoasiga qabul qilindingiz.\nEmployee ID: ${employeeId}`, mainKeyboard())
+    await sendMessage(query.message.chat.id, `Ariza tasdiqlandi: ${employeeId}`)
+  } else {
+    await pool.query(`UPDATE employee_applications SET status = 'rejected', reviewed_by = $1, reviewed_at = NOW(), updated_at = NOW() WHERE telegram_id = $2 AND status = 'pending'`, [query.from.id, telegramId])
+    await sendMessage(telegramId, 'Arizangiz hozircha tasdiqlanmadi. Admin bilan bog‘laning.')
+    await sendMessage(query.message.chat.id, 'Ariza rad etildi.')
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -69,7 +153,7 @@ export async function POST(request: NextRequest) {
     if (update.callback_query) await handleCallback(update)
     return NextResponse.json({ ok: true })
   } catch (error) {
-    console.error('[v0] Telegram webhook error', error)
+    console.error('[v0] Telegram office webhook error', error)
     return NextResponse.json({ ok: false }, { status: 200 })
   }
 }
