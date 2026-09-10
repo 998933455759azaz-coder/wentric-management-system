@@ -15,6 +15,7 @@ export type TelegramUpdate = {
     from?: TelegramUser
     text?: string
     contact?: { phone_number: string; user_id?: number; first_name?: string }
+    photo?: Array<{ file_id: string; width: number; height: number }>
   }
   callback_query?: {
     id: string
