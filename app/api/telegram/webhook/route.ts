@@ -34,7 +34,7 @@ function adminKeyboard() {
 }
 
 async function sendAccessDenied(chatId: number) {
-  await sendMessage(chatId, 'Kechirasiz, bu bot faqat Wentric Company jamoasi uchun. Sizga taklif havolasi yoki ruxsat berilgan Telegram ID kerak.', onboardingKeyboard())
+  await sendMessage(chatId, 'Kechirasiz, bu bot faqat Wentric Company jamoasi uchun. Sizga taklif havolasi yoki ruxsat berilgan Telegram ID kerak.')
 }
 
 async function handleMessage(update: TelegramUpdate) {
@@ -54,18 +54,30 @@ async function handleMessage(update: TelegramUpdate) {
       await sendMessage(message.chat.id, 'Wentric Company boshqaruv markaziga xush kelibsiz, Admin.', adminKeyboard())
       return
     }
+    const existing = await applicationFor(user.id)
     if (!startPayload) {
-      await sendAccessDenied(message.chat.id)
+      if (!existing) {
+        await sendAccessDenied(message.chat.id)
+        return
+      }
+      if (!existing.privacy_accepted_at) {
+        await sendMessage(message.chat.id, 'Wentric Company maxfiylik siyosati va jamoa qoidalariga rozilik berasizmi?', { inline_keyboard: [[{ text: 'Roziman', callback_data: 'consent:accept' }, { text: 'Rad etaman', callback_data: 'consent:reject' }]] })
+        return
+      }
+      await sendMessage(message.chat.id, `Sizning arizangiz holati: ${existing.status === 'pending' ? 'ko‘rib chiqilmoqda' : existing.status === 'approved' ? 'tasdiqlangan' : 'rad etilgan'}.`, existing.status === 'approved' ? employeeKeyboard() : onboardingKeyboard())
       return
     }
     const invite = await pool.query('SELECT id, code, max_uses, used_count FROM bot_invites WHERE code = $1 AND is_active = TRUE AND used_count < max_uses', [startPayload])
     if (!invite.rows[0]) {
-      await sendMessage(message.chat.id, 'Bu taklif havolasi yaroqsiz yoki foydalanish limiti tugagan.', onboardingKeyboard())
+      await sendMessage(message.chat.id, 'Bu taklif havolasi yaroqsiz yoki foydalanish limiti tugagan.')
       return
     }
-    const existing = await applicationFor(user.id)
     if (existing) {
-      await sendMessage(message.chat.id, `Sizning arizangiz holati: ${existing.status === 'pending' ? 'ko‘rib chiqilmoqda' : existing.status === 'approved' ? 'tasdiqlangan' : 'rad etilgan'}.`, onboardingKeyboard())
+      if (!existing.privacy_accepted_at) {
+        await sendMessage(message.chat.id, 'Wentric Company maxfiylik siyosati va jamoa qoidalariga rozilik berasizmi?', { inline_keyboard: [[{ text: 'Roziman', callback_data: 'consent:accept' }, { text: 'Rad etaman', callback_data: 'consent:reject' }]] })
+        return
+      }
+      await sendMessage(message.chat.id, `Sizning arizangiz holati: ${existing.status === 'pending' ? 'ko‘rib chiqilmoqda' : existing.status === 'approved' ? 'tasdiqlangan' : 'rad etilgan'}.`, existing.status === 'approved' ? employeeKeyboard() : onboardingKeyboard())
       return
     }
     await pool.query('INSERT INTO employee_applications (telegram_id, invite_id, full_name, temporary_id) VALUES ($1, $2, $3, $4)', [user.id, invite.rows[0].id, '', `TMP-${user.id}`])
@@ -193,11 +205,11 @@ async function handleMessage(update: TelegramUpdate) {
   if (isAdmin(user.id) && commandText === '/invite') {
     const code = `WENTRIC-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
     await pool.query('INSERT INTO bot_invites (code, label, max_uses) VALUES ($1, $2, $3)', [code, 'Wentric employee invite', 1])
-    await sendMessage(message.chat.id, `Bir martalik invite havola:\nhttps://t.me/WentricEmployeebot?start=${code}`, mainKeyboard())
+    await sendMessage(message.chat.id, `Bir martalik invite havola:\nhttps://t.me/WentricEmployeebot?start=${code}`, adminKeyboard())
     return
   }
 
-  if (isAdmin(user.id)) { await sendMessage(message.chat.id, 'Admin buyruqlari:\n/invite — invite yaratish\n/pending — arizalarni ko‘rish\n/employees — xodimlar ro‘yxati\n/assign WEN-0001 | Vazifa — vazifa berish', mainKeyboard()); return }
+  if (isAdmin(user.id)) { await sendMessage(message.chat.id, 'Admin buyruqlari:\n/invite — invite yaratish\n/pending — arizalarni ko‘rish\n/employees — xodimlar ro‘yxati\n/assign WEN-0001 | Vazifa — vazifa berish', adminKeyboard()); return }
   if (application?.status === 'approved') await sendMessage(message.chat.id, `Wentric Employee ID: ${application.employee_id}\n\nSizga hozircha yangi vazifa biriktirilmagan.`, mainKeyboard())
 }
 
@@ -206,6 +218,8 @@ async function handleCallback(update: TelegramUpdate) {
   if (!query?.message || !query.data) return
   await answerCallbackQuery(query.id)
   if (query.data === 'consent:accept') {
+    const application = await applicationFor(query.from.id)
+    if (!application) { await sendMessage(query.message.chat.id, 'Bu taklif havolasi yoki Telegram ID orqali berilgan ruxsat topilmadi.'); return }
     await pool.query('UPDATE employee_applications SET privacy_accepted_at = NOW(), updated_at = NOW() WHERE telegram_id = $1', [query.from.id])
     await sendMessage(query.message.chat.id, 'Rozilik qayd etildi. Endi “Ariza topshirish” tugmasini bosing.', onboardingKeyboard()); return
   }
