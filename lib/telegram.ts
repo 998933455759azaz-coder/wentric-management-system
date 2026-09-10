@@ -37,9 +37,11 @@ export async function telegramRequest<T>(method: string, body: Record<string, un
   return response.json() as Promise<{ ok: boolean; result: T }>
 }
 
+const miniAppUrl = 'https://wentric-management-system.vercel.app/telegram/profile'
+
 export function mainKeyboard() {
   return {
-    keyboard: [[{ text: 'Profilim' }, { text: 'Vazifalarim' }], [{ text: 'Yordam' }]],
+    keyboard: [[{ text: 'Profilim', web_app: { url: miniAppUrl } }, { text: 'Vazifalarim' }], [{ text: 'Yordam' }]],
     resize_keyboard: true,
     is_persistent: true,
   }
@@ -47,7 +49,7 @@ export function mainKeyboard() {
 
 export function inlineMenu() {
   return {
-    inline_keyboard: [[{ text: 'Profilim', callback_data: 'profile' }, { text: 'Vazifa qo‘shish', callback_data: 'task_add' }], [{ text: 'Yordam', callback_data: 'help' }]],
+    inline_keyboard: [[{ text: 'Shaxsiy profilni ochish', web_app: { url: miniAppUrl } }], [{ text: 'Vazifa qo‘shish', callback_data: 'task_add' }, { text: 'Yordam', callback_data: 'help' }]],
   }
 }
 

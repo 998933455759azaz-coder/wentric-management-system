@@ -36,7 +36,7 @@ async function handleMessage(update: TelegramUpdate) {
   if (text === '/profile' || text === 'Profilim') {
     const profile = await pool.query('SELECT p.full_name, p.phone, p.region, p.district FROM user_profiles p JOIN bot_users u ON u.id = p.user_id WHERE u.telegram_id = $1', [message.from.id])
     const row = profile.rows[0]
-    await sendMessage(message.chat.id, row ? `Profilingiz:\nIsm: ${row.full_name ?? 'kiritilmagan'}\nTelefon: ${row.phone ?? 'kiritilmagan'}\nHudud: ${row.region ?? 'kiritilmagan'}` : 'Profilingiz hali to‘ldirilmagan. Telefon raqamingizni yuboring.', row ? inlineMenu() : { keyboard: [[{ text: 'Telefon raqamni yuborish', request_contact: true }]], resize_keyboard: true })
+    await sendMessage(message.chat.id, row ? `Profilingiz:\nIsm: ${row.full_name ?? 'kiritilmagan'}\nTelefon: ${row.phone ?? 'kiritilmagan'}\nHudud: ${row.region ?? 'kiritilmagan'}\n\nTo‘liq HTML5 profil kartangizni oching:` : 'Profilingiz hali to‘ldirilmagan. Avval telefon raqamingizni yuboring.', row ? inlineMenu() : { keyboard: [[{ text: 'Telefon raqamni yuborish', request_contact: true }]], resize_keyboard: true })
     return
   }
 
