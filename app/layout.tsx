@@ -3,8 +3,8 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'O‘zbekcha Bot | Telegram yordamchi',
-  description: 'O‘zbek tilidagi Telegram botni boshqarish va ishga tushirish qo‘llanmasi.',
+  title: 'Wentric Employee Bot | Telegram boshqaruvi',
+  description: 'Wentric Employee Bot — xodimlar uchun o‘zbekcha Telegram yordamchi.',
   generator: 'v0.app',
   icons: {
     icon: [
@@ -26,11 +26,8 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  colorScheme: 'light dark',
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: 'white' },
-    { media: '(prefers-color-scheme: dark)', color: 'black' },
-  ],
+  colorScheme: 'dark',
+  themeColor: '#050505',
 }
 
 export default function RootLayout({
